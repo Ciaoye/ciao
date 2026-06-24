@@ -337,7 +337,6 @@ async function sendMsg() {
     msgInput.disabled = false;
     sendBtn.disabled = false;
     isStreaming = false;
-    msgInput.focus();
   }
   } catch(e) {
     console.error('sendMsg error:', e);
@@ -349,7 +348,6 @@ async function sendMsg() {
 }
 
 form.addEventListener('submit', function(e){ e.preventDefault(); sendMsg(); });
-msgInput.focus();
 
 /* ─── Health check ─── */
 setInterval(function() {
