@@ -6,7 +6,7 @@
 https://github.com/Ciaoye/ciao
 ```
 
-当前部署分支是 `123`。push 到这个分支后，会触发 GitHub Pages / 静态页面部署。
+当前部署分支是 `main`。push 到这个分支后，会触发 GitHub Pages / 静态页面部署。
 
 主要文件：
 
