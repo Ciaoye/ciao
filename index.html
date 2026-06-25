@@ -131,6 +131,7 @@ const LOGO_B64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAYAAACt
 
 /* ─── Agent Connection ─── */
 const AGENT_URL  = 'https://ciao-274203-7-1446728973.sh.run.tcloudbase.com/send-message';
+const AGENT_TOKEN = 'ciao_9rJ4vQx72LmP0aT8sYdK3nW6bE1HfZ5c';
 const STORAGE_KEY = 'ciao_thread_id';
 
 /* ─── Strip Markdown ─── */
@@ -269,9 +270,12 @@ async function sendMsg() {
   createTyping();
 
   try {
+    const headers = { 'Content-Type':'application/json', 'Accept':'text/event-stream' };
+    if (AGENT_TOKEN) headers['x-ciao-token'] = AGENT_TOKEN;
+
     const resp = await fetch(AGENT_URL, {
       method: 'POST',
-      headers: { 'Content-Type':'application/json', 'Accept':'text/event-stream' },
+      headers: headers,
       body: JSON.stringify({
         threadId: threadId, runId: 'r-'+Date.now(),
         messages: messages, tools: [], context: [], state: {}, forwardedProps: {}
