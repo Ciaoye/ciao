@@ -148,6 +148,7 @@ function stripMarkdown(text) {
 let threadId = localStorage.getItem(STORAGE_KEY) || ('ciao-' + crypto.randomUUID().slice(0, 8));
 let messages = [];
 let isStreaming = false;
+let latestUserRow = null;
 localStorage.setItem(STORAGE_KEY, threadId);
 
 const chatEl     = document.getElementById('chat');
@@ -200,6 +201,16 @@ document.getElementById('searchInput').addEventListener('input', function(e) {
 });
 
 /* ─── Render Messages ─── */
+function pinLatestUserQuestion() {
+  if (!latestUserRow) return;
+  requestAnimationFrame(function() {
+    chatEl.scrollTo({
+      top: Math.max(0, latestUserRow.offsetTop - 18),
+      behavior: 'smooth'
+    });
+  });
+}
+
 function addMessage(role, content) {
   if (welcomeMsg) welcomeMsg.remove();
 
@@ -218,9 +229,8 @@ function addMessage(role, content) {
   row.appendChild(b);
   chatEl.appendChild(row);
   if (role === 'user') {
-    requestAnimationFrame(function() {
-      chatEl.scrollTop = row.offsetTop - 18;
-    });
+    latestUserRow = row;
+    pinLatestUserQuestion();
   }
   return b;
 }
@@ -235,6 +245,7 @@ function createTyping() {
   b.innerHTML = '<div class="thinking-label">ciao is typing</div><div class="typing-dots"><span></span><span></span><span></span></div>';
   row.appendChild(img); row.appendChild(b);
   chatEl.appendChild(row);
+  pinLatestUserQuestion();
 }
 
 function removeTyping() {
@@ -304,6 +315,7 @@ async function sendMsg() {
                 if (bub) { bub.innerHTML = ''; agentBubble = bub; }
               }
               if (!agentBubble) agentBubble = addMessage('agent', '');
+              pinLatestUserQuestion();
             }
             fullContent += evt.delta || '';
             agentBubble.innerHTML = stripMarkdown(fullContent).replace(/</g,'&lt;') + '<span class="time">'+timeStr()+'</span>';
