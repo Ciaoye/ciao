@@ -134,8 +134,22 @@ const IS_LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
 const AGENT_URL  = IS_LOCAL
   ? 'http://127.0.0.1:9000/web-chat'
   : 'https://ciao-274203-7-1446728973.sh.run.tcloudbase.com/web-chat';
+const READY_URL = AGENT_URL.replace(/\/web-chat$/, '/readyz');
 const AGENT_TOKEN = 'ciao_9rJ4vQx72LmP0aT8sYdK3nW6bE1HfZ5c';
 const STORAGE_KEY = 'ciao_thread_id';
+const DISCONNECTED_MESSAGE = '不好意思，现在我这里连接断开了……你问问俏也怎么回事啊！';
+
+const urlState = new URL(location.href);
+const shouldStartNewChat =
+  urlState.searchParams.has('new') ||
+  urlState.hash === '#new' ||
+  /\/new\/?$/.test(urlState.pathname);
+if (shouldStartNewChat) {
+  localStorage.removeItem(STORAGE_KEY);
+  urlState.searchParams.delete('new');
+  urlState.hash = '';
+  history.replaceState(null, '', urlState.pathname.replace(/\/new\/?$/, '/index.html'));
+}
 
 /* ─── Strip Markdown ─── */
 function stripMarkdown(text) {
@@ -251,8 +265,78 @@ function addMessage(role, content) {
   return b;
 }
 
+function startNewChat() {
+  removeTyping();
+  threadId = 'ciao-' + crypto.randomUUID().slice(0, 8);
+  messages = [];
+  latestUserRow = null;
+  isStreaming = false;
+  localStorage.setItem(STORAGE_KEY, threadId);
+  document.querySelectorAll('.chat .row').forEach(function(row) { row.remove(); });
+  if (welcomeMsg) chatEl.appendChild(welcomeMsg);
+  msgInput.value = '';
+  sendBtn.disabled = false;
+  chatEl.scrollTop = 0;
+}
+
 function createAgentBubble() {
   return addMessage('agent', '');
+}
+
+const MAX_AGENT_BUBBLES = 4;
+
+function targetBubbleCount(text) {
+  const len = text.replace(/\s+/g, '').length;
+  if (len <= 120) return 1;
+  if (len <= 300) return 2;
+  if (len <= 560) return 3;
+  return MAX_AGENT_BUBBLES;
+}
+
+function splitAtNaturalPauses(text, wanted) {
+  const normalized = text.trim();
+  if (!normalized || wanted <= 1) return normalized ? [normalized] : [];
+
+  const parts = [];
+  let rest = normalized;
+
+  while (parts.length < wanted - 1 && rest.length) {
+    const remainingSlots = wanted - parts.length;
+    const target = Math.ceil(rest.length / remainingSlots);
+    const min = Math.floor(target * 0.55);
+    const max = Math.ceil(target * 1.35);
+    const windowText = rest.slice(0, Math.min(rest.length, max));
+    const pauseRe = /[。！？!?；;…]\s*|\n{2,}/g;
+    let match;
+    let cut = -1;
+
+    while ((match = pauseRe.exec(windowText)) !== null) {
+      if (match.index + match[0].length >= min) {
+        cut = match.index + match[0].length;
+      }
+    }
+
+    if (cut < 0) {
+      const soft = windowText.lastIndexOf('\n');
+      if (soft >= min) cut = soft + 1;
+    }
+    if (cut < 0) {
+      const comma = Math.max(
+        windowText.lastIndexOf('，'),
+        windowText.lastIndexOf(','),
+        windowText.lastIndexOf('、')
+      );
+      if (comma >= min) cut = comma + 1;
+    }
+    if (cut < 0) cut = Math.min(rest.length, target);
+
+    const piece = rest.slice(0, cut).trim();
+    if (piece) parts.push(piece);
+    rest = rest.slice(cut).trim();
+  }
+
+  if (rest) parts.push(rest);
+  return parts.slice(0, MAX_AGENT_BUBBLES);
 }
 
 function splitAgentBubbles(content) {
@@ -261,10 +345,10 @@ function splitAgentBubbles(content) {
       .split(/\n?\s*<bubble>\s*\n?/g)
       .map(function(part) { return part.trim(); })
       .filter(Boolean)
-      .slice(0, 3);
+      .slice(0, MAX_AGENT_BUBBLES);
   }
   const normalized = content.trim();
-  return normalized ? [normalized] : [];
+  return splitAtNaturalPauses(normalized, targetBubbleCount(normalized));
 }
 
 function renderAgentBubbles(rawContent, bubbles) {
@@ -301,6 +385,10 @@ async function sendMsg() {
   try {
   const text = msgInput.value.trim();
   if (!text || isStreaming) return;
+  if (text === '/new') {
+    startNewChat();
+    return;
+  }
 
   msgInput.value = '';
   addMessage('user', text);
@@ -368,7 +456,8 @@ async function sendMsg() {
           if (evt.type === 'RUN_ERROR') {
             removeTyping();
             if (!agentBubble) agentBubble = addMessage('agent', '');
-            fullContent = '嗯…我这里出了点问题：'+(evt.message||'');
+            console.warn('agent run error:', evt.message || 'unknown');
+            fullContent = DISCONNECTED_MESSAGE;
             agentBubble.innerHTML = renderBubbleText(fullContent);
             hasContent = true;
             setStatus(false);
@@ -381,13 +470,14 @@ async function sendMsg() {
     if (!hasContent) {
       setStatus(false);
       if (!agentBubble) agentBubble = addMessage('agent', '');
-      agentBubble.innerHTML = renderBubbleText(fullContent||'嗯…我好像卡住了，没收到回复。要不你再说一次？');
+      agentBubble.innerHTML = renderBubbleText(fullContent||DISCONNECTED_MESSAGE);
     }
     if (fullContent) messages.push({role:'assistant',content:fullContent});
     setStatus(true);
   } catch(err) {
     removeTyping();
-    addMessage('agent', '嗯…我这里出了点问题：'+err.message+'。要不你再说一次？');
+    console.warn('send failed:', err);
+    addMessage('agent', DISCONNECTED_MESSAGE);
     setStatus(false);
   } finally {
     isStreaming = false;
@@ -395,7 +485,7 @@ async function sendMsg() {
   }
   } catch(e) {
     console.error('sendMsg error:', e);
-    addMessage('agent', '发送失败：'+e.message);
+    addMessage('agent', DISCONNECTED_MESSAGE);
     isStreaming = false;
     sendBtn.disabled = false;
   }
@@ -404,10 +494,14 @@ async function sendMsg() {
 form.addEventListener('submit', function(e){ e.preventDefault(); sendMsg(); });
 
 /* ─── Health check ─── */
-setInterval(function() {
-  fetch('https://ciao-274203-7-1446728973.sh.run.tcloudbase.com/healthz')
+function checkStatus() {
+  fetch(READY_URL, { cache: 'no-store' })
     .then(function(r) { setStatus(r.ok); })
     .catch(function() { setStatus(false); });
+}
+checkStatus();
+setInterval(function() {
+  checkStatus();
 }, 30000);
 </script>
 
