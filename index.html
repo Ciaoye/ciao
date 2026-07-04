@@ -64,6 +64,10 @@ body::after{content:"";position:fixed;inset:0;background:repeating-linear-gradie
 .typing-dots span:nth-child(2){animation-delay:.2s}
 .typing-dots span:nth-child(3){animation-delay:.4s}
 @keyframes dotBounce{0%,60%,100%{opacity:.2;transform:translateY(0)}30%{opacity:.8;transform:translateY(-4px)}}
+.inline-typing{display:flex;gap:4px;padding-top:8px}
+.inline-typing span{width:5px;height:5px;background:var(--ink);border-radius:50%;opacity:.35;animation:dotBounce 1.2s infinite}
+.inline-typing span:nth-child(2){animation-delay:.2s}
+.inline-typing span:nth-child(3){animation-delay:.4s}
 
 /* ─── Welcome ─── */
 .welcome{text-align:center;padding:36px 16px;opacity:.55}
@@ -134,10 +138,12 @@ const IS_LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
 const AGENT_URL  = IS_LOCAL
   ? 'http://127.0.0.1:9000/web-chat'
   : 'https://ciao-274203-7-1446728973.sh.run.tcloudbase.com/web-chat';
-const READY_URL = AGENT_URL.replace(/\/web-chat$/, '/readyz');
+const READY_URL = AGENT_URL.replace(/\/web-chat$/, '/modelz');
 const AGENT_TOKEN = 'ciao_9rJ4vQx72LmP0aT8sYdK3nW6bE1HfZ5c';
 const STORAGE_KEY = 'ciao_thread_id';
 const DISCONNECTED_MESSAGE = '不好意思，现在我这里连接断开了……你问问俏也怎么回事啊！';
+const MODEL_OFFLINE_MESSAGE = '我现在好像接不上脑子了……你等一下再发一次试试？';
+const RUN_ERROR_MESSAGE = '我这边刚刚出了一点问题。你再发一次试试，或者问问俏也怎么回事啊！';
 
 const urlState = new URL(location.href);
 const shouldStartNewChat =
@@ -173,6 +179,10 @@ function stripMarkdown(text) {
 
 function renderBubbleText(text) {
   return stripMarkdown(text).replace(/</g,'&lt;');
+}
+
+function renderStreamingText(text) {
+  return renderBubbleText(text) + '<div class="inline-typing"><span></span><span></span><span></span></div>';
 }
 
 let threadId = localStorage.getItem(STORAGE_KEY) || ('ciao-' + crypto.randomUUID().slice(0, 8));
@@ -351,13 +361,17 @@ function splitAgentBubbles(content) {
   return splitAtNaturalPauses(normalized, targetBubbleCount(normalized));
 }
 
-function renderAgentBubbles(rawContent, bubbles) {
+function renderAgentBubbles(rawContent, bubbles, isStreaming) {
   const parts = splitAgentBubbles(rawContent);
   if (!parts.length) return bubbles;
   while (bubbles.length < parts.length) bubbles.push(createAgentBubble());
   for (let i = 0; i < bubbles.length; i++) {
     bubbles[i].style.display = i < parts.length ? '' : 'none';
-    if (i < parts.length) bubbles[i].innerHTML = renderBubbleText(parts[i]);
+    if (i < parts.length) {
+      bubbles[i].innerHTML = isStreaming && i === parts.length - 1
+        ? renderStreamingText(parts[i])
+        : renderBubbleText(parts[i]);
+    }
   }
   return bubbles;
 }
@@ -416,7 +430,7 @@ async function sendMsg() {
     }
 
     // Keep typing indicator visible, transition it into real bubble on first content
-    let agentBubble = null, agentBubbles = [], fullContent = '', hasContent = false;
+    let agentBubble = null, agentBubbles = [], fullContent = '', hasContent = false, streamFinished = false;
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -450,14 +464,28 @@ async function sendMsg() {
               pinLatestUserQuestion();
             }
             fullContent += evt.delta || '';
-            agentBubbles = renderAgentBubbles(fullContent, agentBubbles);
+            agentBubbles = renderAgentBubbles(fullContent, agentBubbles, true);
             hasContent = true;
+          }
+          if (evt.type === 'TEXT_MESSAGE_END' || evt.type === 'RUN_FINISHED') {
+            streamFinished = true;
+            if (fullContent) agentBubbles = renderAgentBubbles(fullContent, agentBubbles, false);
+          }
+          if (evt.type === 'MODEL_UNAVAILABLE') {
+            removeTyping();
+            if (!agentBubble) agentBubble = addMessage('agent', '');
+            streamFinished = true;
+            fullContent = MODEL_OFFLINE_MESSAGE;
+            agentBubble.innerHTML = renderBubbleText(fullContent);
+            hasContent = true;
+            setStatus(false);
           }
           if (evt.type === 'RUN_ERROR') {
             removeTyping();
             if (!agentBubble) agentBubble = addMessage('agent', '');
             console.warn('agent run error:', evt.message || 'unknown');
-            fullContent = DISCONNECTED_MESSAGE;
+            streamFinished = true;
+            fullContent = RUN_ERROR_MESSAGE;
             agentBubble.innerHTML = renderBubbleText(fullContent);
             hasContent = true;
             setStatus(false);
@@ -467,6 +495,10 @@ async function sendMsg() {
     }
 
     removeTyping(); // safety: remove if still lingering
+    if (!streamFinished && fullContent && hasContent) {
+      fullContent += '\n\n（刚刚像是没说完，你可以再发一次试试。）';
+      agentBubbles = renderAgentBubbles(fullContent, agentBubbles, false);
+    }
     if (!hasContent) {
       setStatus(false);
       if (!agentBubble) agentBubble = addMessage('agent', '');
