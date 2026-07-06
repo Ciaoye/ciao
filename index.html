@@ -536,12 +536,6 @@ async function sendMsg(retryText, isRetry) {
       sendBtn.disabled = false;
     }
   }
-  } catch(e) {
-    console.error('sendMsg error:', e);
-    addMessage('agent', DISCONNECTED_MESSAGE);
-    isStreaming = false;
-    sendBtn.disabled = false;
-  }
 }
 
 form.addEventListener('submit', function(e){ e.preventDefault(); sendMsg(); });
