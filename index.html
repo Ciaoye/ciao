@@ -121,7 +121,7 @@ body::after{content:"";position:fixed;inset:0;background:repeating-linear-gradie
 
     <form class="composer" id="form">
       <input id="msg" autocomplete="off" placeholder="输入消息，或输入 /new 开始新聊天" maxlength="2000" />
-      <button id="send" type="submit" aria-label="发送">➤</button>
+      <button id="send" type="button" aria-label="发送">➤</button>
     </form>
 
     <nav class="tabs">
@@ -501,7 +501,6 @@ async function sendMsg() {
     }
     if (!hasContent) {
       setStatus(false);
-      if (!isRetry) throw new Error('stream ended before content');
       if (!agentBubble) agentBubble = addMessage('agent', '');
       agentBubble.innerHTML = renderBubbleText(fullContent||DISCONNECTED_MESSAGE);
     }
@@ -516,6 +515,18 @@ async function sendMsg() {
     sendBtn.disabled = false;
   }
 }
+
+msgInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    sendMsg();
+  }
+});
+
+sendBtn.addEventListener('click', function(e) {
+  e.preventDefault();
+  sendMsg();
+});
 
 form.addEventListener('submit', function(e){ e.preventDefault(); sendMsg(); });
 
