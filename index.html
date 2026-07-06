@@ -395,34 +395,21 @@ function removeTyping() {
 }
 
 /* ─── Send ─── */
-const COLD_START_RETRY_DELAY_MS = 3500;
-
-function wait(ms) {
-  return new Promise(function(resolve) { setTimeout(resolve, ms); });
-}
-
-function updateTypingLabel(text) {
-  const label = document.querySelector('#typingRow .thinking-label');
-  if (label) label.textContent = text;
-}
-
-async function sendMsg(retryText, isRetry) {
+async function sendMsg() {
   try {
-  const text = retryText || msgInput.value.trim();
-  if (!text || (isStreaming && !isRetry)) return;
+  const text = msgInput.value.trim();
+  if (!text || isStreaming) return;
   if (text === '/new') {
     startNewChat();
     return;
   }
 
-  if (!isRetry) {
-    msgInput.value = '';
-    addMessage('user', text);
-    messages.push({ role: 'user', content: text });
-    isStreaming = true;
-    sendBtn.disabled = true;
-    createTyping();
-  }
+  msgInput.value = '';
+  addMessage('user', text);
+  messages.push({ role: 'user', content: text });
+  isStreaming = true;
+  sendBtn.disabled = true;
+  createTyping();
 
   try {
     const headers = { 'Content-Type':'application/json', 'Accept':'text/event-stream' };
@@ -522,19 +509,11 @@ async function sendMsg(retryText, isRetry) {
   } catch(err) {
     console.warn('send failed:', err);
     setStatus(false);
-    if (!isRetry) {
-      updateTypingLabel('ciao is reconnecting');
-      await wait(COLD_START_RETRY_DELAY_MS);
-      updateTypingLabel('ciao is typing');
-      return await sendMsg(text, true);
-    }
     removeTyping();
     addMessage('agent', DISCONNECTED_MESSAGE);
   } finally {
-    if (!isRetry) {
-      isStreaming = false;
-      sendBtn.disabled = false;
-    }
+    isStreaming = false;
+    sendBtn.disabled = false;
   }
 }
 
