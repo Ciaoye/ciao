@@ -519,7 +519,6 @@ async function sendMsg(retryText, isRetry) {
       agentBubble.innerHTML = renderBubbleText(fullContent||DISCONNECTED_MESSAGE);
     }
     if (fullContent) messages.push({role:'assistant',content:fullContent});
-    setStatus(true);
   } catch(err) {
     console.warn('send failed:', err);
     setStatus(false);
