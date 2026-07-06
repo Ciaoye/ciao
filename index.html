@@ -119,7 +119,7 @@ body::after{content:"";position:fixed;inset:0;background:repeating-linear-gradie
       </div>
     </section>
 
-    <form class="composer" id="form">
+    <form class="composer" id="form" action="javascript:void(0)">
       <input id="msg" autocomplete="off" placeholder="输入消息，或输入 /new 开始新聊天" maxlength="2000" />
       <button id="send" type="button" aria-label="发送">➤</button>
     </form>
@@ -141,9 +141,9 @@ const AGENT_URL  = IS_LOCAL
 const READY_URL = AGENT_URL.replace(/\/web-chat$/, '/modelz');
 const AGENT_TOKEN = 'ciao_9rJ4vQx72LmP0aT8sYdK3nW6bE1HfZ5c';
 const STORAGE_KEY = 'ciao_thread_id';
-const DISCONNECTED_MESSAGE = '不好意思，现在我这里连接断开了……你问问俏也怎么回事啊！';
-const MODEL_OFFLINE_MESSAGE = '我现在好像接不上脑子了……你等一下再发一次试试？';
-const RUN_ERROR_MESSAGE = '我这边刚刚出了一点问题。你再发一次试试，或者问问俏也怎么回事啊！';
+const DISCONNECTED_MESSAGE = '我这边连接断开了……不是你没发出去，是我这里没接上。你等我缓一下再发一次试试？';
+const MODEL_OFFLINE_MESSAGE = '我现在接不上脑子了……像是脑袋那边断线了。你等一下再试一次？';
+const RUN_ERROR_MESSAGE = '我这边刚刚断了一下……不是你说错了，是我这里没接住。你再发一次试试？';
 
 const urlState = new URL(location.href);
 const shouldStartNewChat =
@@ -395,8 +395,9 @@ function removeTyping() {
 }
 
 /* ─── Send ─── */
+const STREAM_FIRST_EVENT_TIMEOUT_MS = 15000;
+
 async function sendMsg() {
-  try {
   const text = msgInput.value.trim();
   if (!text || isStreaming) return;
   if (text === '/new') {
@@ -411,13 +412,26 @@ async function sendMsg() {
   sendBtn.disabled = true;
   createTyping();
 
+  let clearFirstEventTimer = function() {};
   try {
     const headers = { 'Content-Type':'application/json', 'Accept':'text/event-stream' };
     if (AGENT_TOKEN) headers['x-ciao-token'] = AGENT_TOKEN;
+    const controller = new AbortController();
+    let firstEventSeen = false;
+    let firstEventTimer = setTimeout(function() {
+      controller.abort();
+    }, STREAM_FIRST_EVENT_TIMEOUT_MS);
+    clearFirstEventTimer = function() {
+      if (firstEventTimer) {
+        clearTimeout(firstEventTimer);
+        firstEventTimer = null;
+      }
+    };
 
     const resp = await fetch(AGENT_URL, {
       method: 'POST',
       headers: headers,
+      signal: controller.signal,
       body: JSON.stringify({
         threadId: threadId, runId: 'r-'+Date.now(),
         messages: [{ role: 'user', content: text }], tools: [], context: [], state: {}, forwardedProps: {}
@@ -426,6 +440,11 @@ async function sendMsg() {
 
     if (!resp.ok) {
       const eText = await resp.text().catch(function(){return '未知错误'});
+      if (resp.status === 503) {
+        const offlineError = new Error('model unavailable');
+        offlineError.kind = 'model_offline';
+        throw offlineError;
+      }
       throw new Error('HTTP '+resp.status+': '+eText);
     }
 
@@ -450,6 +469,10 @@ async function sendMsg() {
 
         try {
           const evt = JSON.parse(jstr);
+          if (!firstEventSeen) {
+            firstEventSeen = true;
+            clearFirstEventTimer();
+          }
           if (evt.type === 'TEXT_MESSAGE_CONTENT') {
             if (!agentBubble) {
               // Transition typing bubble → real bubble
@@ -509,8 +532,11 @@ async function sendMsg() {
     console.warn('send failed:', err);
     setStatus(false);
     removeTyping();
-    addMessage('agent', DISCONNECTED_MESSAGE);
+    addMessage('agent', err && (err.kind === 'model_offline' || err.name === 'AbortError')
+      ? MODEL_OFFLINE_MESSAGE
+      : DISCONNECTED_MESSAGE);
   } finally {
+    clearFirstEventTimer();
     isStreaming = false;
     sendBtn.disabled = false;
   }
