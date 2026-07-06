@@ -395,21 +395,34 @@ function removeTyping() {
 }
 
 /* ─── Send ─── */
-async function sendMsg() {
+const COLD_START_RETRY_DELAY_MS = 3500;
+
+function wait(ms) {
+  return new Promise(function(resolve) { setTimeout(resolve, ms); });
+}
+
+function updateTypingLabel(text) {
+  const label = document.querySelector('#typingRow .thinking-label');
+  if (label) label.textContent = text;
+}
+
+async function sendMsg(retryText, isRetry) {
   try {
-  const text = msgInput.value.trim();
-  if (!text || isStreaming) return;
+  const text = retryText || msgInput.value.trim();
+  if (!text || (isStreaming && !isRetry)) return;
   if (text === '/new') {
     startNewChat();
     return;
   }
 
-  msgInput.value = '';
-  addMessage('user', text);
-  messages.push({ role: 'user', content: text });
-  isStreaming = true;
-  sendBtn.disabled = true;
-  createTyping();
+  if (!isRetry) {
+    msgInput.value = '';
+    addMessage('user', text);
+    messages.push({ role: 'user', content: text });
+    isStreaming = true;
+    sendBtn.disabled = true;
+    createTyping();
+  }
 
   try {
     const headers = { 'Content-Type':'application/json', 'Accept':'text/event-stream' };
@@ -501,19 +514,28 @@ async function sendMsg() {
     }
     if (!hasContent) {
       setStatus(false);
+      if (!isRetry) throw new Error('stream ended before content');
       if (!agentBubble) agentBubble = addMessage('agent', '');
       agentBubble.innerHTML = renderBubbleText(fullContent||DISCONNECTED_MESSAGE);
     }
     if (fullContent) messages.push({role:'assistant',content:fullContent});
     setStatus(true);
   } catch(err) {
-    removeTyping();
     console.warn('send failed:', err);
-    addMessage('agent', DISCONNECTED_MESSAGE);
     setStatus(false);
+    if (!isRetry) {
+      updateTypingLabel('ciao is reconnecting');
+      await wait(COLD_START_RETRY_DELAY_MS);
+      updateTypingLabel('ciao is typing');
+      return await sendMsg(text, true);
+    }
+    removeTyping();
+    addMessage('agent', DISCONNECTED_MESSAGE);
   } finally {
-    isStreaming = false;
-    sendBtn.disabled = false;
+    if (!isRetry) {
+      isStreaming = false;
+      sendBtn.disabled = false;
+    }
   }
   } catch(e) {
     console.error('sendMsg error:', e);
