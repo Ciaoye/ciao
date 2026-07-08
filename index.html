@@ -185,6 +185,10 @@ function renderStreamingText(text) {
   return renderBubbleText(text) + '<div class="inline-typing"><span></span><span></span><span></span></div>';
 }
 
+function renderStreamingDraftText(text) {
+  return renderStreamingText(text.replace(/\n?\s*<bubble>\s*\n?/g, '\n\n').trimStart());
+}
+
 let threadId = localStorage.getItem(STORAGE_KEY) || ('ciao-' + crypto.randomUUID().slice(0, 8));
 let messages = [];
 let isStreaming = false;
@@ -448,7 +452,7 @@ async function sendMsg() {
       throw new Error('HTTP '+resp.status+': '+eText);
     }
 
-    // Keep typing indicator visible, transition it into real bubble on first content
+    // Keep typing indicator visible, transition it into a stable draft bubble on first content.
     let agentBubble = null, agentBubbles = [], fullContent = '', hasContent = false, streamFinished = false;
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
@@ -487,7 +491,7 @@ async function sendMsg() {
               pinLatestUserQuestion();
             }
             fullContent += evt.delta || '';
-            agentBubbles = renderAgentBubbles(fullContent, agentBubbles, true);
+            agentBubble.innerHTML = renderStreamingDraftText(fullContent);
             hasContent = true;
           }
           if (evt.type === 'TEXT_MESSAGE_END' || evt.type === 'RUN_FINISHED') {
