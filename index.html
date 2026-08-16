@@ -538,6 +538,11 @@ async function sendMsg() {
         offlineError.kind = 'model_offline';
         throw offlineError;
       }
+      if (resp.status === 413) {
+        const sizeError = new Error('image payload too large');
+        sizeError.kind = 'payload_too_large';
+        throw sizeError;
+      }
       throw new Error('HTTP '+resp.status+': '+eText);
     }
 
@@ -627,6 +632,8 @@ async function sendMsg() {
     removeTyping();
     addMessage('agent', err && (err.kind === 'model_offline' || err.name === 'AbortError')
       ? MODEL_OFFLINE_MESSAGE
+      : err && err.kind === 'payload_too_large'
+      ? '这张图片太大了，我这里一次接不住。请换一张更小的图片再试试。'
       : DISCONNECTED_MESSAGE);
   } finally {
     clearFirstEventTimer();
