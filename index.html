@@ -159,7 +159,11 @@ const AGENT_TOKEN = 'ciao_9rJ4vQx72LmP0aT8sYdK3nW6bE1HfZ5c';
 const STORAGE_KEY = 'ciao_thread_id';
 const DISCONNECTED_MESSAGE = '我这边连接断开了……不是你没发出去，是我这里没接上。你等我缓一下再发一次试试？';
 const MODEL_OFFLINE_MESSAGE = '我现在接不上脑子了……像是脑袋那边断线了。你等一下再试一次？';
-const RUN_ERROR_MESSAGE = '我这边刚刚断了一下……不是你说错了，是我这里没接住。你再发一次试试？';
+const RUN_ERROR_MESSAGE = '我这边刚刚断了一下……不是你说错了，是我这里卡了一下。你再发一次试试？';
+const IMAGE_TOO_LARGE_MESSAGE = '这张图片有点大，我这里处理起来有点吃力。换一张小一点的再发我，好不好？';
+const IMAGE_READ_ERROR_MESSAGE = '这张图片我还没读出来……你换一张 PNG、JPEG 或 WebP 再试试？';
+const MAX_IMAGE_INPUT_BYTES = 20 * 1024 * 1024;
+const MAX_IMAGE_DATA_URL_LENGTH = 180 * 1024;
 
 const urlState = new URL(location.href);
 const shouldStartNewChat =
@@ -356,22 +360,79 @@ function renderSelectedImage() {
   attachmentPreview.hidden = false;
 }
 
+function loadImageForCompression(file) {
+  if (typeof createImageBitmap === 'function') {
+    return createImageBitmap(file);
+  }
+  return new Promise(function(resolve, reject) {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    image.onload = function() {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = function() {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('image decode failed'));
+    };
+    image.src = objectUrl;
+  });
+}
+
+async function compressImageFile(file) {
+  if (!file.type.startsWith('image/') || file.size > MAX_IMAGE_INPUT_BYTES) {
+    throw new Error('image input too large or unsupported');
+  }
+
+  const source = await loadImageForCompression(file);
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('image canvas unavailable');
+  let dataUrl = '';
+  const maxSides = [1600, 1280, 1024];
+  const qualities = [0.84, 0.72, 0.60, 0.48];
+  for (let sideIndex = 0; sideIndex < maxSides.length && dataUrl.length <= MAX_IMAGE_DATA_URL_LENGTH; sideIndex += 1) {
+    const scale = Math.min(1, maxSides[sideIndex] / Math.max(source.width, source.height));
+    canvas.width = Math.max(1, Math.round(source.width * scale));
+    canvas.height = Math.max(1, Math.round(source.height * scale));
+    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+    for (let qualityIndex = 0; qualityIndex < qualities.length; qualityIndex += 1) {
+      dataUrl = canvas.toDataURL('image/webp', qualities[qualityIndex]);
+      if (dataUrl.startsWith('data:image/webp') && dataUrl.length <= MAX_IMAGE_DATA_URL_LENGTH) break;
+    }
+    if (dataUrl.length > MAX_IMAGE_DATA_URL_LENGTH) dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+  }
+  if (typeof source.close === 'function') source.close();
+  if (!dataUrl || dataUrl.length > MAX_IMAGE_DATA_URL_LENGTH) {
+    throw new Error('compressed image still too large');
+  }
+  return {
+    dataUrl: dataUrl,
+    name: file.name,
+    type: dataUrl.slice(5, dataUrl.indexOf(';')),
+    size: dataUrl.length,
+    originalSize: file.size
+  };
+}
+
 attachBtn.addEventListener('click', function() { imageInput.click(); });
-imageInput.addEventListener('change', function() {
+imageInput.addEventListener('change', async function() {
   const file = imageInput.files && imageInput.files[0];
   if (!file) return;
   const allowed = ['image/png', 'image/jpeg', 'image/webp'];
-  if (!allowed.includes(file.type) || file.size > 6 * 1024 * 1024) {
-    alert('请选择 6MB 以内的 PNG、JPEG 或 WebP 图片。');
+  if (!allowed.includes(file.type) || file.size > MAX_IMAGE_INPUT_BYTES) {
+    addMessage('agent', IMAGE_READ_ERROR_MESSAGE);
     clearSelectedImage();
     return;
   }
-  const reader = new FileReader();
-  reader.onload = function() {
-    selectedImage = { dataUrl: String(reader.result), name: file.name, type: file.type, size: file.size };
+  try {
+    selectedImage = await compressImageFile(file);
     renderSelectedImage();
-  };
-  reader.readAsDataURL(file);
+  } catch (error) {
+    console.warn('image compression failed:', error);
+    clearSelectedImage();
+    addMessage('agent', IMAGE_READ_ERROR_MESSAGE);
+  }
 });
 
 function createAgentBubble() {
@@ -628,12 +689,12 @@ async function sendMsg() {
     if (fullContent) messages.push({role:'assistant',content:fullContent});
   } catch(err) {
     console.warn('send failed:', err);
-    setStatus(false);
+    if (!err || err.kind !== 'payload_too_large') setStatus(false);
     removeTyping();
     addMessage('agent', err && (err.kind === 'model_offline' || err.name === 'AbortError')
       ? MODEL_OFFLINE_MESSAGE
       : err && err.kind === 'payload_too_large'
-      ? '这张图片太大了，我这里一次接不住。请换一张更小的图片再试试。'
+      ? IMAGE_TOO_LARGE_MESSAGE
       : DISCONNECTED_MESSAGE);
   } finally {
     clearFirstEventTimer();
